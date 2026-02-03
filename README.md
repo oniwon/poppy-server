@@ -62,4 +62,5 @@ API 문서는 Swagger를 통해 제공됩니다.
 
 ## 아키텍처 구조
 
-![Architecture](/Users/oniwon/IdeaProjects/poppy-server/architecture.png)
+<img width="826" height="387" alt="architecture" src="https://github.com/user-attachments/assets/359eb703-ad85-4f97-a07e-c87b479f9931" />
+
