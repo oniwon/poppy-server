@@ -9,7 +9,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -25,7 +24,6 @@ public class ReservationReminderScheduler {
     private final DistributedLockService lockService;
 
     @Scheduled(cron = REMINDER_SCHEDULE)
-    @Transactional(readOnly = true)
     public void sendReservationReminders() {
         if (!lockService.tryLock(DistributedLockService.RESERVATION_24H_BEFORE_LOCK)) {
             log.debug("Failed to acquire reservation reminder lock. Skipping this execution.");
