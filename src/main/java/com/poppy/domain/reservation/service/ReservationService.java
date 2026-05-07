@@ -23,8 +23,6 @@ import com.poppy.domain.user.dto.response.UserReservationRspDto;
 import com.poppy.domain.user.entity.User;
 import com.poppy.domain.user.repository.LoginUserProvider;
 import lombok.RequiredArgsConstructor;
-import org.redisson.api.RLock;
-import org.redisson.api.RedissonClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,14 +30,12 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class ReservationService {
-    private final RedissonClient redissonClient;
     private final PopupStoreRepository popupStoreRepository;
     private final ReservationAvailableSlotRepository reservationAvailableSlotRepository;
     private final ReservationRepository reservationRepository;
@@ -49,10 +45,6 @@ public class ReservationService {
     private final PaymentService paymentService;
     private final NotificationService notificationService;
     private final LoginUserProvider loginUserProvider;  // 로그인 유저 확인용
-
-    private static final String LOCK_PREFIX = "reservation:lock:";
-    private static final long WAIT_TIME = 3L;
-    private static final long LEASE_TIME = 3L;
 
     // 어플에서 진행하는 예약
     @Transactional
@@ -69,68 +61,47 @@ public class ReservationService {
         if (popupStore.getReservationType() != ReservationType.ONLINE)
             throw new BusinessException(ErrorCode.INVALID_RESERVATION);
 
-        String lockKey = LOCK_PREFIX + storeId + ":" + date + ":" + time;
-        RLock lock = redissonClient.getLock(lockKey);
+        // Redis 슬롯 확인
+        Integer redisSlot = redisSlotService.getSlotFromRedis(storeId, date, time);
+        if (redisSlot == null || redisSlot < person || redisSlot <= 0)
+            throw new BusinessException(ErrorCode.NO_AVAILABLE_SLOT);
 
-        try {
-            // Redisson을 이용해 락을 시도
-            boolean isLocked = lock.tryLock(WAIT_TIME, LEASE_TIME, TimeUnit.SECONDS);
+        // 로그인 유저 학인
+        User user = loginUserProvider.getLoggedInUser();
 
-            // 다른 사용자가 이미 락을 획득한 상태일 때
-            if(!isLocked) throw new BusinessException(ErrorCode.RESERVATION_CONFLICT);
+        // 기존 예약 체크
+        Optional<Reservation> existingReservation =
+                reservationRepository.findByUserIdAndPopupStoreIdAndDate(user.getId(), storeId, date);
 
-            // Redis 슬롯 확인
-            Integer redisSlot = redisSlotService.getSlotFromRedis(storeId, date, time);
-            if (redisSlot == null || redisSlot < person || redisSlot <= 0)
-                throw new BusinessException(ErrorCode.NO_AVAILABLE_SLOT);
+        if (existingReservation.isPresent()) {
+            Reservation reservation = existingReservation.get();
 
-            // 로그인 유저 학인
-            User user = loginUserProvider.getLoggedInUser();
+            // 이미 결제된 예약이 있는 경우
+            if (reservation.getStatus() == ReservationStatus.CHECKED)
+                throw new BusinessException(ErrorCode.ALREADY_BOOKED);
 
-            // 기존 예약 체크
-            Optional<Reservation> existingReservation =
-                    reservationRepository.findByUserIdAndPopupStoreIdAndDate(user.getId(), storeId, date);
+            // 취소된 예약인 경우 업데이트
+            if (reservation.getStatus() == ReservationStatus.CANCELED) {
+                paymentRepository.deleteByReservationId(reservation.getId());   // 기존 결제 정보 삭제
 
-            if (existingReservation.isPresent()) {
-                Reservation reservation = existingReservation.get();
-
-                // 이미 결제된 예약이 있는 경우
-                if (reservation.getStatus() == ReservationStatus.CHECKED)
-                    throw new BusinessException(ErrorCode.ALREADY_BOOKED);
-
-                // 취소된 예약인 경우 업데이트
-                if (reservation.getStatus() == ReservationStatus.CANCELED) {
-                    paymentRepository.deleteByReservationId(reservation.getId());   // 기존 결제 정보 삭제
-
-                    reservation.updateReservation(time, person);
-                    reservation.updateStatus(ReservationStatus.PENDING);
-                    return createPaymentAndGetResponse(reservation, user, person);
-                }
-            }
-
-            // 임시 예약 생성
-            Reservation tempReservation = reservationRepository.save(Reservation.builder()
-                    .popupStore(popupStore)
-                    .user(new User(user.getId()))
-                    .date(date)
-                    .time(time)
-                    .status(ReservationStatus.PENDING)
-                    .person(person)
-                    .build()
-            );
-
-            return createPaymentAndGetResponse(tempReservation, user, person);
-        }
-        catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BusinessException(ErrorCode.RESERVATION_FAILED);
-        }
-        finally {
-            // 락 해제
-            if (lock.isHeldByCurrentThread()) {
-                lock.unlock();
+                reservation.updateReservation(time, person);
+                reservation.updateStatus(ReservationStatus.PENDING);
+                return createPaymentAndGetResponse(reservation, user, person);
             }
         }
+
+        // 임시 예약 생성
+        Reservation tempReservation = reservationRepository.save(Reservation.builder()
+                .popupStore(popupStore)
+                .user(new User(user.getId()))
+                .date(date)
+                .time(time)
+                .status(ReservationStatus.PENDING)
+                .person(person)
+                .build()
+        );
+
+        return createPaymentAndGetResponse(tempReservation, user, person);
     }
 
     // 결제 정보 생성 및 응답 DTO 반환 메서드
@@ -235,67 +206,51 @@ public class ReservationService {
             throw new BusinessException(ErrorCode.NOT_NULL_PARAMETER);
         }
 
-        String lockKey = LOCK_PREFIX + storeId + ":" + date + ":" + time;
-        RLock lock = redissonClient.getLock(lockKey);
+        // Redis 슬롯 확인
+        Integer redisSlot = redisSlotService.getSlotFromRedis(storeId, date, time);
+        if (redisSlot == null) {
+            throw new BusinessException(ErrorCode.SLOT_NOT_FOUND);
+        }
 
         try {
-            boolean isLocked = lock.tryLock(WAIT_TIME, LEASE_TIME, TimeUnit.SECONDS);
-            if (!isLocked) throw new BusinessException(ErrorCode.RESERVATION_CONFLICT);
+            // Redis 슬롯 증가 먼저 시도
+            redisSlotService.incrementSlot(storeId, date, time, person);
 
-            // Redis 슬롯 확인
-            Integer redisSlot = redisSlotService.getSlotFromRedis(storeId, date, time);
-            if (redisSlot == null) {
-                throw new BusinessException(ErrorCode.SLOT_NOT_FOUND);
+            // 예약 정보 조회
+            Reservation reservation = reservationRepository.findByUserIdAndPopupStoreIdAndDateAndTime(
+                            userId, storeId, date, time)
+                    .orElseThrow(() -> new BusinessException(ErrorCode.RESERVATION_NOT_FOUND));
+
+            // 결제 정보 조회 및 결제 취소
+            Payment payment = paymentRepository.findByReservationId(reservation.getId())
+                    .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
+
+            paymentService.cancelPayment(payment.getOrderId(), "고객 예약 취소");
+
+            // 예약 상태 변경
+            reservation.updateStatus(ReservationStatus.CANCELED);
+
+            // slot 업데이트
+            ReservationAvailableSlot slot = reservationAvailableSlotRepository
+                    .findByPopupStoreIdAndDateAndTime(storeId, date, time)
+                    .orElseThrow(() -> new BusinessException(ErrorCode.SLOT_NOT_FOUND));
+
+            slot.increaseSlot(person);
+            if (slot.isAvailable() && slot.getStatus() == PopupStoreStatus.FULL) {
+                slot.updatePopupStatus(PopupStoreStatus.AVAILABLE);
             }
 
-            try {
-                // Redis 슬롯 증가 먼저 시도
-                redisSlotService.incrementSlot(storeId, date, time, person);
-
-                // 예약 정보 조회
-                Reservation reservation = reservationRepository.findByUserIdAndPopupStoreIdAndDateAndTime(
-                                userId, storeId, date, time)
-                        .orElseThrow(() -> new BusinessException(ErrorCode.RESERVATION_NOT_FOUND));
-
-                // 결제 정보 조회 및 결제 취소
-                Payment payment = paymentRepository.findByReservationId(reservation.getId())
-                        .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
-
-                paymentService.cancelPayment(payment.getOrderId(), "고객 예약 취소");
-
-                // 예약 상태 변경
-                reservation.updateStatus(ReservationStatus.CANCELED);
-
-                // slot 업데이트
-                ReservationAvailableSlot slot = reservationAvailableSlotRepository
-                        .findByPopupStoreIdAndDateAndTime(storeId, date, time)
-                        .orElseThrow(() -> new BusinessException(ErrorCode.SLOT_NOT_FOUND));
-
-                slot.increaseSlot(person);
-                if (slot.isAvailable() && slot.getStatus() == PopupStoreStatus.FULL) {
-                    slot.updatePopupStatus(PopupStoreStatus.AVAILABLE);
-                }
-
-                reservationAvailableSlotRepository.save(slot);
-            }
-            catch (Exception e) {
-                // DB 작업 실패시 Redis 롤백
-                redisSlotService.decrementSlot(storeId, date, time, person);
-                throw e;
-            }
+            reservationAvailableSlotRepository.save(slot);
         }
-        catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BusinessException(ErrorCode.CANCELLATION_FAILED);
-        }
-        finally {
-            if (lock.isHeldByCurrentThread()) {
-                lock.unlock();
-            }
+        catch (Exception e) {
+            // DB 작업 실패시 Redis 롤백
+            redisSlotService.decrementSlot(storeId, date, time, person);
+            throw e;
         }
     }
 
     // 유저 별 예약 취소
+    @Transactional
     public void cancelReservationByReservationId(Long userId, Long reservationId) {
         Reservation reservation = reservationRepository.findByIdAndUserId(reservationId, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESERVATION_NOT_FOUND));
@@ -317,6 +272,21 @@ public class ReservationService {
         return reservations.stream()
                 .map(UserReservationRspDto::from)
                 .collect(Collectors.toList());
+    }
+
+    // Facade에서 락 키 구성을 위해 사용
+    @Transactional(readOnly = true)
+    public Reservation findReservationByOrderId(String orderId) {
+        Payment payment = paymentRepository.findByOrderId(orderId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
+        return payment.getReservation();
+    }
+
+    // Facade에서 락 키 구성을 위해 사용
+    @Transactional(readOnly = true)
+    public Reservation findReservation(Long userId, Long reservationId) {
+        return reservationRepository.findByIdAndUserId(reservationId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.RESERVATION_NOT_FOUND));
     }
 
     // 유저의 특정 예약 상세 조회
