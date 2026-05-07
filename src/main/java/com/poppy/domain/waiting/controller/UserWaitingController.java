@@ -4,9 +4,9 @@ import com.poppy.common.api.RspTemplate;
 import com.poppy.domain.waiting.dto.response.UserWaitingHistoryRspDto;
 import com.poppy.domain.waiting.dto.response.WaitingRspDto;
 import com.poppy.domain.waiting.service.UserWaitingService;
+import com.poppy.domain.waiting.service.WaitingFacade;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -14,6 +14,7 @@ import java.util.List;
 @RestController
 @RequiredArgsConstructor
 public class UserWaitingController {
+    private final WaitingFacade waitingFacade;
     private final UserWaitingService userWaitingService;
 
     @PostMapping("/waiting")
@@ -21,7 +22,7 @@ public class UserWaitingController {
         return new RspTemplate<>(
                 HttpStatus.CREATED,
                 "대기 등록이 완료되었습니다.",
-                userWaitingService.registerWaiting(storeId)
+                waitingFacade.registerWaiting(storeId)
         );
     }
 
