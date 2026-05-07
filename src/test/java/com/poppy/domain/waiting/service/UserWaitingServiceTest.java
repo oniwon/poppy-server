@@ -19,8 +19,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.redisson.api.RLock;
-import org.redisson.api.RedissonClient;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDate;
@@ -41,13 +39,9 @@ class UserWaitingServiceTest {
     @Mock
     private PopupStoreRepository popupStoreRepository;
     @Mock
-    private RedissonClient redissonClient;
-    @Mock
     private WaitingUtils waitingUtils;
     @Mock
     private LoginUserProvider loginUserProvider;
-    @Mock
-    private RLock rLock;
 
     @InjectMocks
     private UserWaitingService userWaitingService;
@@ -70,8 +64,8 @@ class UserWaitingServiceTest {
                 .masterUser(user)
                 .startDate(LocalDate.now())
                 .endDate(LocalDate.now().plusDays(7))
-                .openingTime(LocalTime.of(9, 0))
-                .closingTime(LocalTime.of(18, 0))
+                .openingTime(LocalTime.of(0, 0))
+                .closingTime(LocalTime.of(23, 59))
                 .isActive(true)
                 .isEnd(false)
                 .build();
@@ -86,12 +80,10 @@ class UserWaitingServiceTest {
     }
 
     @Test
-    void 웨이팅_등록_성공() throws InterruptedException {
+    void 웨이팅_등록_성공() {
         // given
         when(loginUserProvider.getLoggedInUser()).thenReturn(user);
         when(popupStoreRepository.findById(anyLong())).thenReturn(Optional.of(popupStore));
-        when(redissonClient.getLock(anyString())).thenReturn(rLock);
-        when(rLock.tryLock(anyLong(), anyLong(), any())).thenReturn(true);
         when(waitingRepository.findMaxWaitingNumberByStoreId(anyLong())).thenReturn(Optional.of(0));
         when(waitingRepository.save(any(Waiting.class))).thenReturn(waiting);
 
@@ -104,23 +96,10 @@ class UserWaitingServiceTest {
     }
 
     @Test
-    void 웨이팅_등록_락획득실패() throws InterruptedException {
-        // given
-        when(redissonClient.getLock(anyString())).thenReturn(rLock);
-        when(rLock.tryLock(anyLong(), anyLong(), any())).thenReturn(false);
-
-        // when & then
-        assertThrows(BusinessException.class, () ->
-                userWaitingService.registerWaiting(1L));
-    }
-
-    @Test
-    void 웨이팅_등록_최대인원초과() throws InterruptedException {
+    void 웨이팅_등록_최대인원초과() {
         // given
         when(loginUserProvider.getLoggedInUser()).thenReturn(user);
         when(popupStoreRepository.findById(anyLong())).thenReturn(Optional.of(popupStore));
-        when(redissonClient.getLock(anyString())).thenReturn(rLock);
-        when(rLock.tryLock(anyLong(), anyLong(), any())).thenReturn(true);
         when(waitingRepository.countByPopupStoreIdAndStatusIn(anyLong(), anySet())).thenReturn(51L);
 
         // when & then

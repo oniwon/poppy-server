@@ -15,8 +15,6 @@ import com.poppy.domain.waiting.entity.WaitingStatus;
 import com.poppy.domain.waiting.repository.WaitingRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.redisson.api.RLock;
-import org.redisson.api.RedissonClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,7 +23,6 @@ import java.time.LocalTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Service
@@ -35,7 +32,6 @@ public class UserWaitingService {
     private final WaitingRepository waitingRepository;
     private final NotificationService notificationService;
     private final PopupStoreRepository popupStoreRepository;
-    private final RedissonClient redissonClient;
     private final WaitingUtils waitingUtils;
     private final LoginUserProvider loginUserProvider;
 
@@ -47,53 +43,38 @@ public class UserWaitingService {
     // 선착순 대기 등록 (앱으로 사용자가 수행)
     @Transactional
     public WaitingRspDto registerWaiting(Long storeId) {
-        String lockKey = LOCK_PREFIX + storeId;
-        RLock lock = redissonClient.getLock(lockKey);
+        PopupStore store = popupStoreRepository.findById(storeId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.STORE_NOT_FOUND));
 
-        try {
-            boolean isLocked = lock.tryLock(WAIT_TIME, LEASE_TIME, TimeUnit.SECONDS);
-            if (!isLocked) throw new BusinessException(ErrorCode.WAITING_CONFLICT);
+        // 운영 시간 체크
+        validateOperatingHours(store);
 
-            PopupStore store = popupStoreRepository.findById(storeId)
-                    .orElseThrow(() -> new BusinessException(ErrorCode.STORE_NOT_FOUND));
+        User user = loginUserProvider.getLoggedInUser();
 
-            // 운영 시간 체크
-            validateOperatingHours(store);
+        checkMaxWaitingCount(storeId);
+        checkDuplicateWaiting(storeId, user.getId());
 
-            User user = loginUserProvider.getLoggedInUser();
+        // 대기번호 생성
+        Integer waitingNumber = getNextWaitingNumber(storeId);
 
-            checkMaxWaitingCount(storeId);
-            checkDuplicateWaiting(storeId, user.getId());
+        Waiting waiting = waitingRepository.save(Waiting.builder()
+                .popupStore(store)
+                .user(user)
+                .waitingNumber(waitingNumber)
+                .waitingDate(LocalDate.now())
+                .waitingTime(LocalTime.now())
+                .build());
 
-            // 대기번호 생성
-            Integer waitingNumber = getNextWaitingNumber(storeId);
+        // 내 앞에 몇 팀 있는지 계산
+        int peopleAhead = waitingRepository.countPeopleAhead(
+                storeId,
+                waiting.getWaitingNumber(),
+                Set.of(WaitingStatus.WAITING, WaitingStatus.CALLED)
+        );
 
-            Waiting waiting = waitingRepository.save(Waiting.builder()
-                    .popupStore(store)
-                    .user(user)
-                    .waitingNumber(waitingNumber)
-                    .waitingDate(LocalDate.now())
-                    .waitingTime(LocalTime.now())
-                    .build());
+        notificationService.sendNotification(waiting, NotificationType.TEAMS_AHEAD, peopleAhead);
 
-            // 내 앞에 몇 팀 있는지 계산
-            int peopleAhead = waitingRepository.countPeopleAhead(
-                    storeId,
-                    waiting.getWaitingNumber(),
-                    Set.of(WaitingStatus.WAITING, WaitingStatus.CALLED)
-            );
-
-            notificationService.sendNotification(waiting, NotificationType.TEAMS_AHEAD, peopleAhead);
-
-            return WaitingRspDto.from(waiting);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BusinessException(ErrorCode.WAITING_FAILED);
-        } finally {
-            if (lock.isHeldByCurrentThread()) {
-                lock.unlock();
-            }
-        }
+        return WaitingRspDto.from(waiting);
     }
 
     // 웨이팅 내역 조회
