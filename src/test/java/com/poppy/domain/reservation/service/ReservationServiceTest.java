@@ -52,13 +52,13 @@ class ReservationServiceTest {
     @Mock
     private RedisSlotService redisSlotService;
     @Mock
-    private AsyncRedisSlotDecrementService asyncRedisSlotDecrementService;
-    @Mock
     private PaymentService paymentService;
     @Mock
-    private NotificationService notificationService;
-    @Mock
     private LoginUserProvider loginUserProvider;
+    @Mock
+    private AsyncRedisSlotDecrementService asyncRedisSlotDecrementService;
+    @Mock
+    private NotificationService notificationService;
 
     @InjectMocks
     private ReservationService reservationService;
@@ -144,7 +144,7 @@ class ReservationServiceTest {
 
         when(paymentRepository.findByOrderId(orderId)).thenReturn(Optional.of(mockPayment));
         when(popupStoreRepository.findById(storeId)).thenReturn(Optional.of(popupStore));
-        when(reservationAvailableSlotRepository.findByPopupStoreIdAndDateAndTime(storeId, date, time))
+        when(reservationAvailableSlotRepository.findByPopupStoreIdAndDateAndTimeForUpdate(storeId, date, time))
                 .thenReturn(Optional.of(slot));
         when(reservationRepository.findByUserIdAndPopupStoreIdAndDateAndStatus(
                 eq(user.getId()), eq(storeId), eq(date), eq(ReservationStatus.CHECKED)))
@@ -187,7 +187,7 @@ class ReservationServiceTest {
                 .thenReturn(Optional.of(reservation));
         when(paymentRepository.findByReservationId(reservation.getId()))
                 .thenReturn(Optional.of(payment));
-        when(reservationAvailableSlotRepository.findByPopupStoreIdAndDateAndTime(storeId, date, time))
+        when(reservationAvailableSlotRepository.findByPopupStoreIdAndDateAndTimeForUpdate(storeId, date, time))
                 .thenReturn(Optional.of(slot));
 
         doAnswer(inv -> {

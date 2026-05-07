@@ -174,7 +174,7 @@ public class ReservationService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.STORE_NOT_FOUND));
 
         ReservationAvailableSlot slot = reservationAvailableSlotRepository
-                .findByPopupStoreIdAndDateAndTime(storeId, date, time)
+                .findByPopupStoreIdAndDateAndTimeForUpdate(storeId, date, time)
                 .orElseThrow(() -> new BusinessException(ErrorCode.SLOT_NOT_FOUND));
 
         // 예약 가능한 슬롯 없음
@@ -232,7 +232,7 @@ public class ReservationService {
 
             // slot 업데이트
             ReservationAvailableSlot slot = reservationAvailableSlotRepository
-                    .findByPopupStoreIdAndDateAndTime(storeId, date, time)
+                    .findByPopupStoreIdAndDateAndTimeForUpdate(storeId, date, time)
                     .orElseThrow(() -> new BusinessException(ErrorCode.SLOT_NOT_FOUND));
 
             slot.increaseSlot(person);
