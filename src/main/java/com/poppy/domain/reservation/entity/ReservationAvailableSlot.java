@@ -1,7 +1,5 @@
 package com.poppy.domain.reservation.entity;
 
-import com.poppy.common.exception.BusinessException;
-import com.poppy.common.exception.ErrorCode;
 import com.poppy.domain.popupStore.entity.PopupStore;
 import jakarta.persistence.*;
 import lombok.*;
@@ -43,18 +41,6 @@ public class ReservationAvailableSlot {
 
     public boolean isAvailable() {
         return this.availableSlot > 0;
-    }
-
-    public void decreaseSlot(int count) {
-        if (this.availableSlot < count) {
-            throw new BusinessException(ErrorCode.NO_AVAILABLE_SLOT);
-        }
-
-        this.availableSlot -= count;
-    }
-
-    public void increaseSlot(int count) {
-        this.availableSlot += count;
     }
 
     public void updatePopupStatus(PopupStoreStatus status) {

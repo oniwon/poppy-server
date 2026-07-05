@@ -5,7 +5,6 @@ import com.poppy.common.auth.cache.OAuthOTUCache;
 import com.poppy.common.auth.dto.TokenRspDto;
 import com.poppy.common.exception.BusinessException;
 import com.poppy.common.exception.ErrorCode;
-import com.poppy.domain.reservation.service.ReservationFacade;
 import com.poppy.domain.reservation.service.ReservationService;
 import com.poppy.domain.user.dto.response.UserPopupStoreRspDto;
 import com.poppy.domain.user.dto.response.UserReservationDetailRspDto;
@@ -33,7 +32,6 @@ public class UserService {
     private final JwtTokenizer jwtTokenizer;
     private final RedisTemplate<String, String> redisTemplate;
     private final ReservationService reservationService;
-    private final ReservationFacade reservationFacade;
 
     // 로그인/회원가입
     @Transactional
@@ -111,7 +109,7 @@ public class UserService {
         // 유저 확인
         User user = loginUserProvider.getLoggedInUser();
 
-        reservationFacade.cancelReservationByReservationId(user.getId(), reservationId);
+        reservationService.cancelReservationByReservationId(user.getId(), reservationId);
     }
 
     // 닉네임 변경

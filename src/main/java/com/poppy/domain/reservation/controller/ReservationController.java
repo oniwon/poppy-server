@@ -3,7 +3,7 @@ package com.poppy.domain.reservation.controller;
 import com.poppy.common.api.RspTemplate;
 import com.poppy.domain.payment.dto.ReservationPaymentRspDto;
 import com.poppy.domain.reservation.dto.request.ReservationReqDto;
-import com.poppy.domain.reservation.service.ReservationFacade;
+import com.poppy.domain.reservation.service.ReservationService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -13,12 +13,12 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/reservation")
 @RequiredArgsConstructor
 public class ReservationController {
-    private final ReservationFacade reservationFacade;
+    private final ReservationService reservationService;
 
     // 예약 요청 시 결제
     @PostMapping
     public RspTemplate<ReservationPaymentRspDto> reservation(@Valid @RequestBody ReservationReqDto reservationReqDto) {
-        ReservationPaymentRspDto paymentInfo = reservationFacade.reservation(
+        ReservationPaymentRspDto paymentInfo = reservationService.reservation(
                 reservationReqDto.getPopupStoreId(),
                 reservationReqDto.getDate(),
                 reservationReqDto.getTime(),

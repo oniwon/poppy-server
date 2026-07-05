@@ -16,6 +16,8 @@ public class DistributedLockService {
     public static final String NOTIFICATION_CLEANUP_LOCK = "notification-cleanup-lock";
     public static final String RESERVATION_24H_BEFORE_LOCK = "reservation-24h-before-lock";
     public static final String SCRAP_STORE_OPENING_LOCK = "scrap-store-opening-lock";
+    public static final String RESERVATION_HOLD_EXPIRY_LOCK = "reservation-hold-expiry-lock";
+    public static final String RESERVATION_SLOT_RECONCILE_LOCK = "reservation-slot-reconcile-lock";
 
 
     private final RedissonClient redissonClient;
